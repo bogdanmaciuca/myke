@@ -1,7 +1,6 @@
 """
 TODO:
-- CLI arguments for debug, verbose, run after compilation
-- Include and library paths
+- add support for building libraries and maybe multiple targets at once
 """
 
 import argparse
@@ -66,7 +65,7 @@ def ParseCache():
 # CLI arguments parser
 argParser = argparse.ArgumentParser(prog='Myke', description='Simple C/C++ build tool')
 argParser.add_argument('filename', type=str)
-argParser.add_argument('-r', '--run', action='store_true')
+argParser.add_argument('-r', '--run', action='store_true', help='Runs the program after compilation completes')
 argParser.add_argument('-v', '--verbose', action='store_true')
 cliArgs = argParser.parse_args()
 
