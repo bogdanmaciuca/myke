@@ -1,9 +1,16 @@
+"""
+TODO:
+- CLI arguments for debug, verbose, run after compilation
+- Include and library paths
+"""
+
+import argparse
 import sys
 import os
 import time
 import subprocess
 
-# Parser
+# Makefile parser
 class ParserException(Exception):
     pass
 
@@ -23,9 +30,9 @@ def ParseKey(i):
     key = ''
     while makefile[i] != ':' or makefile[i] == ' ':
         if i >= len(makefile) - 1:
-            raise ParserException("Myke error: Expected ':' instead of <EOF>")
+            raise ParserException("Myke: error: Expected ':' instead of <EOF>")
         elif makefile[i] == '\n':
-            raise ParserException("Myke error: Expected ':' instead of '\\n'")
+            raise ParserException("Myke: error: Expected ':' instead of '\\n'")
         key += makefile[i]
         i += 1
     i = Advance(i)
@@ -56,13 +63,15 @@ def ParseCache():
         table[tokens[0]] = float(tokens[1])
     return table
 
+# CLI arguments parser
+argParser = argparse.ArgumentParser(prog='Myke', description='Simple C/C++ build tool')
+argParser.add_argument('filename', type=str)
+argParser.add_argument('-r', '--run', action='store_true')
+argParser.add_argument('-v', '--verbose', action='store_true')
+cliArgs = argParser.parse_args()
 
 BUILD_DIR = 'build/'
 CACHE_PATH = BUILD_DIR + 'myke_cache.txt'
-
-if len(sys.argv) < 2:
-    print('Usage: py myke.py [makefile]')
-    exit(1)
 
 # Create build directory if doesn't already exist
 makefile = open(sys.argv[1], 'r').read()
@@ -118,7 +127,7 @@ else:
 sources = []
 if 'Sources' in contents:
     if len(contents['Sources']) == 0:
-        print('Myke error: Expected at least one element in the [Sources] field.')
+        print('Myke: error: Expected at least one element in the [Sources] field.')
         errors = True
     else:
         for file in contents['Sources']:
@@ -130,13 +139,16 @@ if 'Sources' in contents:
             except OSError:
                 print('Myke error: Could not find file:', file)
 else:
-    print('Myke error: Could not find the [Sources] field.')
+    print('Myke: error: Could not find the [Sources] field.')
     errors = True
     pass
 
 # Include and libraries path
 incPaths = ['-I' + p for p in contents.get('IncPath', [])]
 libPaths = ['-L' + p for p in contents.get('LibPath', [])]
+
+# Libraries
+libraries = ['-l' + p for p in contents.get('Libs', [])]
 
 if errors == True:
     print('Myke: Could not compile, there were semantic errors in the configuration file')
@@ -150,7 +162,10 @@ if len(sources) != 0:
     # Running the compiler
     # The compiler will be run in the build directory, not in the working directory
     sourcesPaths = ['../' + s for s in sources]
-    procCompleted = subprocess.run([contents['Compiler'][0], '-c'] + sourcesPaths, cwd=BUILD_DIR)
+    args = [contents['Compiler'][0], '-c'] + sourcesPaths
+    if cliArgs.verbose:
+        args.append('-v')
+    procCompleted = subprocess.run(args, cwd=BUILD_DIR)
     # If compilation was successful update cache
     if procCompleted.returncode == 0:
         for source in sources:
@@ -176,10 +191,19 @@ for source in cacheTable:
 # Linking
 print('Myke: Linking...')
 objectsPaths = [p.split('.')[0] + '.o' for p in contents['Sources']]
-procCompleted = subprocess.run([contents['Compiler'][0], '-o', contents['Target'][0]] + objectsPaths, cwd=BUILD_DIR)
+args = [contents['Compiler'][0], '-o', contents['Target'][0]]
+args += objectsPaths + libPaths + libraries
+if cliArgs.verbose:
+    args.append('-v')
+procCompleted = subprocess.run(args, cwd=BUILD_DIR)
 if procCompleted.returncode != 0:
     print('Myke: Linking failed.')
     exit(1)
 
 print("Myke: Compilation finished")
+
+if cliArgs.run:
+    procCompleted = subprocess.run([BUILD_DIR + contents['Target'][0]])
+    print('Process exited with code ' + str(procCompleted.returncode) + '.')
+
 exit(0)
