@@ -26,3 +26,6 @@ Libs: opengl32 glfw3 glew32s
 LibPath: my/lib/dir my/second/lib/dir
 ```
 Build by running in the terminal: `py myke.py myMakefile.myke`
+
+## Features
+- faster compilation times by caching the changes and only compiling modified files

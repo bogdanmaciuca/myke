@@ -1,6 +1,8 @@
 """
 TODO:
-- add support for building libraries and maybe multiple targets at once
+- only rebuild if: object files have been modified more recently than
+the last time the source file was modified or they don't exist
+- add support for building libraries: linux and mingw
 """
 
 import argparse
@@ -65,8 +67,10 @@ def ParseCache():
 # CLI arguments parser
 argParser = argparse.ArgumentParser(prog='Myke', description='Simple C/C++ build tool')
 argParser.add_argument('filename', type=str)
-argParser.add_argument('-r', '--run', action='store_true', help='Runs the program after compilation completes')
+argParser.add_argument('-r', '--run', action='store_true', help='runs the program after compilation completes')
 argParser.add_argument('-v', '--verbose', action='store_true')
+argParser.add_argument('-b', '--build', action='store_true', help='builds the target even if no changes have been made since last build')
+argParser.add_argument('-w', '--warnings', action='store_true', help='builds everything with all warnings enabled')
 cliArgs = argParser.parse_args()
 
 BUILD_DIR = 'build/'
@@ -103,23 +107,31 @@ errors = False
 # Compiler
 if 'Compiler' in contents:
     if len(contents['Compiler']) != 1:
-        print('Myke error: Expected to have a single element in the [Compiler] field.')
+        print('Myke: error: Expected to have a single element in the [Compiler] field.')
         errors = True
-    else:
-        compiler = contents['Compiler'][0]
 else:
-    print('Myke error: Could not find the [Compiler] field in the configuration file.')
+    print('Myke: error: Could not find the [Compiler] field in the configuration file.')
     errors = True
 
-# Target (TODO: support both executables and library files)
+# Target
+targetIsLib = False
+targetName = ''
 if 'Target' in contents:
     if len(contents['Target']) != 1:
-        print('Myke error: Expected to have a single element in the [Target] field.')
+        print('Myke: error: Expected to have a single element in the [Target] field.')
         errors = True
-    else:
-        compiler = contents['Target'][0]
+    targetName = contents['Target'][0]
+elif 'TargetLib' in contents:
+    targetIsLib = True
+    if len(contents['TargetLib']) != 1:
+        print('Myke: error: Expected to have a single element in the [TargetLib] field.')
+        errors = True
+    targetName = contents['TargetLib'][0]
 else:
-    print('Myke error: Could not find the [Target] field in the configuration file.')
+    print('Myke: error: Could not find the [Target] nor the [TargetLib] field in the configuration file.')
+    errors = True
+if 'Target' in contents and 'TargetLib' in contents:
+    print('Myke: error: Build configuration file can have either [Target] or [TargetLib], not both at the same time.')
     errors = True
 
 # C/C++ sources
@@ -129,14 +141,18 @@ if 'Sources' in contents:
         print('Myke: error: Expected at least one element in the [Sources] field.')
         errors = True
     else:
-        for file in contents['Sources']:
-            try:
-                lastModTime = os.path.getmtime(file)
-                lastCompileTime = cacheTable.get(file, 0)
-                if lastModTime > lastCompileTime:
-                    sources.append(file)
-            except OSError:
-                print('Myke error: Could not find file:', file)
+        # If the script is run with the --build option, rebuild everything
+        if cliArgs.build:
+            sources = contents['Sources']
+        else:
+            for file in contents['Sources']:
+                try:
+                    lastModTime = os.path.getmtime(file)
+                    lastCompileTime = cacheTable.get(file, 0)
+                    if lastModTime > lastCompileTime:
+                        sources.append(file)
+                except OSError:
+                    print('Myke error: Could not find file:', file)
 else:
     print('Myke: error: Could not find the [Sources] field.')
     errors = True
@@ -145,9 +161,14 @@ else:
 # Include and libraries path
 incPaths = ['-I' + p for p in contents.get('IncPath', [])]
 libPaths = ['-L' + p for p in contents.get('LibPath', [])]
+libPaths.append('-L../') # Clang runs in a different directory so we need to append the running directory of the myke makefile 
 
 # Libraries
 libraries = ['-l' + p for p in contents.get('Libs', [])]
+
+# Additional arguments
+additionalArgs = contents.get('Arguments', [])
+linkerAdditionalArgs = contents.get('LinkerArgs', [])
 
 if errors == True:
     print('Myke: Could not compile, there were semantic errors in the configuration file')
@@ -161,9 +182,9 @@ if len(sources) != 0:
     # Running the compiler
     # The compiler will be run in the build directory, not in the working directory
     sourcesPaths = ['../' + s for s in sources]
-    args = [contents['Compiler'][0], '-c'] + sourcesPaths
-    if cliArgs.verbose:
-        args.append('-v')
+    args = [contents['Compiler'][0], '-c'] + sourcesPaths + additionalArgs
+    if cliArgs.verbose: args.append('-v')
+    if cliArgs.warnings: args.append('-Wall')
     procCompleted = subprocess.run(args, cwd=BUILD_DIR)
     # If compilation was successful update cache
     if procCompleted.returncode == 0:
@@ -190,10 +211,17 @@ for source in cacheTable:
 # Linking
 print('Myke: Linking...')
 objectsPaths = [p.split('.')[0] + '.o' for p in contents['Sources']]
-args = [contents['Compiler'][0], '-o', contents['Target'][0]]
-args += objectsPaths + libPaths + libraries
-if cliArgs.verbose:
-    args.append('-v')
+args = [contents['Compiler'][0], '-o', targetName]
+args += objectsPaths + libPaths + libraries + linkerAdditionalArgs
+if targetIsLib:
+    # Get the compiler used
+    if 'casdlang' in contents['Compiler'][0]:
+        args.append('-fuse-ld=llvm-lib')
+    else:
+        print('Myke: error: compiler not supported for linking. Use the [LinkerArgs] field to supply the compiler with the appropriate options for linking and use [Target] instead of [TargetLib].')
+        exit(1)
+if cliArgs.verbose: args.append('-v')
+if cliArgs.warnings: args.append('-Wall')
 procCompleted = subprocess.run(args, cwd=BUILD_DIR)
 if procCompleted.returncode != 0:
     print('Myke: Linking failed.')
@@ -202,7 +230,11 @@ if procCompleted.returncode != 0:
 print("Myke: Compilation finished")
 
 if cliArgs.run:
-    procCompleted = subprocess.run([BUILD_DIR + contents['Target'][0]])
-    print('Process exited with code ' + str(procCompleted.returncode) + '.')
+    if targetIsLib:
+        print('Myke: Cannot run target as it is a library.')
+        exit(1)
+    else:
+        procCompleted = subprocess.run([BUILD_DIR + targetName])
+        print('Myke: Process exited with code ' + str(procCompleted.returncode) + '.')
 
 exit(0)
