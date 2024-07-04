@@ -1,7 +1,5 @@
 """
 TODO:
-- only rebuild if: object files have been modified more recently than
-the last time the source file was modified or they don't exist
 - add support for building libraries: linux and mingw
 """
 
@@ -57,13 +55,6 @@ def Parse():
             cont[key] = values
     return cont
 
-def ParseCache():
-    table = {}
-    for line in cacheLines:
-        tokens = line.split(' ')
-        table[tokens[0]] = float(tokens[1])
-    return table
-
 # CLI arguments parser
 argParser = argparse.ArgumentParser(prog='Myke', description='Simple C/C++ build tool')
 argParser.add_argument('filename', type=str)
@@ -74,20 +65,11 @@ argParser.add_argument('-w', '--warnings', action='store_true', help='builds eve
 cliArgs = argParser.parse_args()
 
 BUILD_DIR = 'build/'
-CACHE_PATH = BUILD_DIR + 'myke_cache.txt'
 
 # Create build directory if doesn't already exist
 makefile = open(sys.argv[1], 'r').read()
 if not os.path.isdir(BUILD_DIR):
     os.makedirs(BUILD_DIR)
-
-# Read cache file if it exists
-cacheLines = []
-try:
-    cacheLines = open(CACHE_PATH, 'r').readlines()
-except FileNotFoundError:
-    pass
-
 
 # Parse the makefile
 contents = {}
@@ -97,9 +79,6 @@ except ParserException as e:
     print(e)
     print("Myke: Could not compile, there were parsing errors in the configuration file.")
     exit(1)
-
-# Parse the cache file
-cacheTable = ParseCache()
 
 # Error checking and more parsing 
 errors = False
@@ -146,13 +125,14 @@ if 'Sources' in contents:
             sources = contents['Sources']
         else:
             for file in contents['Sources']:
-                try:
-                    lastModTime = os.path.getmtime(file)
-                    lastCompileTime = cacheTable.get(file, 0)
-                    if lastModTime > lastCompileTime:
-                        sources.append(file)
-                except OSError:
-                    print('Myke error: Could not find file:', file)
+                srcLastModTime = 0
+                objLastModTime = 0
+                try: srcLastModTime = os.path.getmtime(file)
+                except OSError: print('Myke error: Could not find file:', file)
+                try: objLastModTime = os.path.getmtime(BUILD_DIR + file.split('.')[0] + '.o')
+                except OSError: pass
+                if srcLastModTime > objLastModTime:
+                    sources.append(file)
 else:
     print('Myke: error: Could not find the [Sources] field.')
     errors = True
@@ -174,7 +154,6 @@ if errors == True:
     print('Myke: Could not compile, there were semantic errors in the configuration file')
     exit(1)
 
-cacheFile = open(CACHE_PATH, 'w')
 # Running the compiler
 # Only compile if there are changes in the source code
 if len(sources) != 0:
@@ -186,27 +165,20 @@ if len(sources) != 0:
     if cliArgs.verbose: args.append('-v')
     if cliArgs.warnings: args.append('-Wall')
     procCompleted = subprocess.run(args, cwd=BUILD_DIR)
-    # If compilation was successful update cache
+    
     if procCompleted.returncode == 0:
-        for source in sources:
-            cacheFile.write(source + ' ' + str(time.time()) + '\n')
         print('Myke: Recompiled:', ', '.join(sources))
     else:
         print('Mike: Compilation failed.')
         exit(1)
 else:
     print('Myke: Object files are up-to-date.')
-# Delete .o files that are no longer necesary
-for source in cacheTable:
-    if source not in contents['Sources']:
-        os.remove(BUILD_DIR + source.split('.')[0] + '.o')
 
-# Only add the sources if they haven't been recompiled and their
-# compile times remained the same but don't add the sources which
-# were deleted from the makefile
-for source in cacheTable:
-    if source not in sources and source in contents['Sources']:
-        cacheFile.write(source + ' ' + str(cacheTable[source]) + '\n')
+# Delete .o files that are no longer necesary
+for file in os.listdir(BUILD_DIR):
+    filename = os.fsdecode(file)
+    if filename.split('.')[0] not in [source.split('.')[0] for source in contents['Sources']] and filename != targetName:
+        os.remove(BUILD_DIR + filename)
 
 # Linking
 print('Myke: Linking...')
