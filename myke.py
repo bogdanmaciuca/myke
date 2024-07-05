@@ -133,14 +133,22 @@ if 'Sources' in contents:
                 except OSError: pass
                 if srcLastModTime > objLastModTime:
                     sources.append(file)
+        sources = [s.replace('\\', '/') for s in sources]
 else:
     print('Myke: error: Could not find the [Sources] field.')
     errors = True
     pass
 
 # Include and libraries path
-incPaths = ['-I' + p for p in contents.get('IncPath', [])]
-libPaths = ['-L' + p for p in contents.get('LibPath', [])]
+incPaths = []
+for path in contents.get('IncPath', []):
+    if os.path.isabs(path): libPaths.append('-I' + path)
+    else: libPaths.append('-I../' + path)
+incPaths.append('-I../') # Clang runs in a different directory so we need to append the running directory of the myke makefile 
+libPaths = []
+for path in contents.get('LibPath', []):
+    if os.path.isabs(path): libPaths.append('-L' + path)
+    else: libPaths.append('-L../' + path)
 libPaths.append('-L../') # Clang runs in a different directory so we need to append the running directory of the myke makefile 
 
 # Libraries
@@ -161,7 +169,7 @@ if len(sources) != 0:
     # Running the compiler
     # The compiler will be run in the build directory, not in the working directory
     sourcesPaths = ['../' + s for s in sources]
-    args = [contents['Compiler'][0], '-c'] + sourcesPaths + additionalArgs
+    args = [contents['Compiler'][0], '-c'] + sourcesPaths + incPaths + additionalArgs
     if cliArgs.verbose: args.append('-v')
     if cliArgs.warnings: args.append('-Wall')
     procCompleted = subprocess.run(args, cwd=BUILD_DIR)
@@ -182,7 +190,7 @@ for file in os.listdir(BUILD_DIR):
 
 # Linking
 print('Myke: Linking...')
-objectsPaths = [p.split('.')[0] + '.o' for p in contents['Sources']]
+objectsPaths = [p.split('/')[-1].split('.')[0] + '.o' for p in contents['Sources']]
 args = [contents['Compiler'][0], '-o', targetName]
 args += objectsPaths + libPaths + libraries + linkerAdditionalArgs
 if targetIsLib:
