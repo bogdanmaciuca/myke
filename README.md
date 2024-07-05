@@ -1,5 +1,5 @@
 # myke
-A simple C/C++ build tool for small and medium sized projects
+A simple C/C++ build tool for small MinGW/Clang projects
 
 ```
 > py myke.py -h
@@ -38,9 +38,8 @@ Build by running in the terminal: `py myke.py myMakefile.myke`
 - `LinkerArgs`: additional arguments to pass to the compiler for linking
 
 ## Features
-- simplicity, lightweight
+- easy to use, lightweight, works out of the box
 - faster compilation times by only compiling modified files
 
 ## Notes
 - only one target is supported per makefile
-- library compilation is pretty compiler-dependent and few compilers are supported at the moment: clang (I aim to provide support for all major compilers)
