@@ -43,3 +43,4 @@ Build by running in the terminal: `py myke.py myMakefile.myke`
 
 ## Notes
 - only one target is supported per makefile
+- should work with any compiler that shares the common CLI arguments with MinGW and Clang
