@@ -1,8 +1,3 @@
-"""
-TODO:
-- add support for building libraries: linux and mingw
-"""
-
 import argparse
 import sys
 import os
@@ -62,6 +57,8 @@ argParser.add_argument('-r', '--run', action='store_true', help='runs the progra
 argParser.add_argument('-v', '--verbose', action='store_true')
 argParser.add_argument('-b', '--build', action='store_true', help='builds the target even if no changes have been made since last build')
 argParser.add_argument('-w', '--warnings', action='store_true', help='builds everything with all warnings enabled')
+argParser.add_argument('-c', '--clean', action='store_true', help='clean the build folder before doing anything else')
+
 cliArgs = argParser.parse_args()
 
 BUILD_DIR = 'build/'
@@ -70,6 +67,12 @@ BUILD_DIR = 'build/'
 makefile = open(sys.argv[1], 'r').read()
 if not os.path.isdir(BUILD_DIR):
     os.makedirs(BUILD_DIR)
+
+if cliArgs.clean:
+    for file in os.listdir(BUILD_DIR):
+        filename = os.fsdecode(file)
+        os.remove(BUILD_DIR + filename)
+    print('Myke: Cleaned the build directory.')
 
 # Parse the makefile
 contents = {}
@@ -149,7 +152,7 @@ libPaths = []
 for path in contents.get('LibPath', []):
     if os.path.isabs(path): libPaths.append('-L' + path)
     else: libPaths.append('-L../' + path)
-libPaths.append('-L../') # Clang runs in a different directory so we need to append the running directory of the myke makefile 
+libPaths.append('-L../')
 
 # Libraries
 libraries = ['-l' + p for p in contents.get('Libs', [])]
@@ -172,7 +175,7 @@ if len(sources) != 0:
     args = [contents['Compiler'][0], '-c'] + sourcesPaths + incPaths + additionalArgs
     if cliArgs.verbose: args.append('-v')
     if cliArgs.warnings: args.append('-Wall')
-    procCompleted = subprocess.run(args, cwd=BUILD_DIR)
+    procCompleted = subprocess.run(args, cwd=os.path.abspath(BUILD_DIR))
     
     if procCompleted.returncode == 0:
         print('Myke: Recompiled:', ', '.join(sources))
@@ -191,20 +194,34 @@ for file in os.listdir(BUILD_DIR):
 # Linking
 print('Myke: Linking...')
 objectsPaths = [p.split('/')[-1].split('.')[0] + '.o' for p in contents['Sources']]
-args = [contents['Compiler'][0], '-o', targetName]
-args += objectsPaths + libPaths + libraries + linkerAdditionalArgs
-if targetIsLib:
-    # Get the compiler used
-    if 'casdlang' in contents['Compiler'][0]:
-        args.append('-fuse-ld=llvm-lib')
-    else:
-        print('Myke: error: compiler not supported for linking. Use the [LinkerArgs] field to supply the compiler with the appropriate options for linking and use [Target] instead of [TargetLib].')
+
+# Get the compiler used
+if 'clang' in contents['Compiler'][0]:
+    args = [contents['Compiler'][0], '-o', targetName]
+    args += objectsPaths + libPaths + libraries + linkerAdditionalArgs
+    if targetIsLib: args.append('-fuse-ld=llvm-lib')
+    if cliArgs.verbose: args.append('-v')
+    if cliArgs.warnings: args.append('-Wall')
+    procCompleted = subprocess.run(args, cwd=os.path.abspath(BUILD_DIR))
+    if procCompleted.returncode != 0:
+        print('Myke: Linking failed.')
         exit(1)
-if cliArgs.verbose: args.append('-v')
-if cliArgs.warnings: args.append('-Wall')
-procCompleted = subprocess.run(args, cwd=BUILD_DIR)
-if procCompleted.returncode != 0:
-    print('Myke: Linking failed.')
+elif 'g++' in contents['Compiler'][0] or 'gcc' in contents['Compiler'][0]:
+    if targetIsLib:
+        args = ['ar', 'rcs', targetName] + objectsPaths
+    else:
+        args = [contents['Compiler'][0], '-o', targetName] + objectsPaths + libPaths + libraries
+    procCompleted = None
+    try:
+        procCompleted = subprocess.run(args, cwd=os.path.abspath(BUILD_DIR))
+    except FileNotFoundError:
+        print('Myke: error: "ar", which is needed to build the library, is not in your PATH.')
+        exit(1)
+    if procCompleted.returncode != 0:
+        print('Myke: Linking failed.')
+        exit(1)
+else:
+    print('Myke: error: compiler not supported for linking. Use the [LinkerArgs] field to supply the compiler with the appropriate options for linking and use [Target] instead of [TargetLib].')
     exit(1)
 
 print("Myke: Compilation finished")
