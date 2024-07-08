@@ -145,7 +145,7 @@ else:
 # Include and libraries path
 incPaths = []
 for path in contents.get('IncPath', []):
-    if os.path.isabs(path): libPaths.append('-I' + path)
+    if os.path.isabs(path): incPaths.append('-I' + path)
     else: libPaths.append('-I../' + path)
 incPaths.append('-I../') # Clang runs in a different directory so we need to append the running directory of the myke makefile 
 libPaths = []
